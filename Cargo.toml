@@ -1,0 +1,29 @@
+[package]
+name = "msg_level_select"
+version = "0.1.0"
+edition = "2024"
+description = "Procedural FTL-style level map generator with ECS-driven traversal state."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/MolecularSadism/msg_level_select"
+keywords = ["bevy", "gamedev", "procedural", "level-select", "map"]
+categories = ["game-engines"]
+readme = "README.md"
+
+[features]
+dev = ["dep:bevy-inspector-egui"]
+
+[dependencies]
+bevy = "0.18"
+bevy_fsm = "0.3.0"
+voronoice = "0.2"
+rand = "0.10"
+thiserror = "2"
+
+[dependencies.bevy-inspector-egui]
+version = "0.36"
+optional = true
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
+required-features = ["dev"]
