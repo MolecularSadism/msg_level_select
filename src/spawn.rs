@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use crate::LevelMapRng;
 use crate::components::{LevelMap, MapEdge, MapNode, MapPath, Site, VoronoiCell, Waypoint};
 use crate::config::LevelMapConfig;
-use crate::generation::{self, GenerationError};
+use crate::generation::{self, Generated, GenerationError};
 use crate::relationships::{EdgePaths, PathEdges, PathFrom, PathTo};
 use crate::state::LocationState;
 use crate::visit::VisitLocation;
@@ -29,11 +29,25 @@ pub trait LevelMapCommands {
     /// `rng` is only consumed when [`LevelMapConfig::seed`] is `None`;
     /// pass it from a `ResMut<LevelMapRng>` system param. When `seed`
     /// is `Some`, the rng is left untouched.
+    ///
+    /// This is a thin wrapper over [`generation::generate`] followed by
+    /// [`Self::spawn_generated_map`]. Split them when the (pure-CPU)
+    /// generation should run off the main thread: generate on a task
+    /// pool, hold the [`Generated`], then call `spawn_generated_map` on
+    /// the main thread once the task completes.
     fn spawn_level_map(
         &mut self,
         rng: &mut LevelMapRng,
         cfg: LevelMapConfig,
     ) -> Result<Entity, GenerationError>;
+
+    /// Spawn the ECS entities for an already-computed [`Generated`].
+    /// Returns the root entity (children are nodes, paths, and edges).
+    ///
+    /// Pairs with [`generation::generate`] to let the pure-CPU
+    /// generation step run separately (e.g. on an
+    /// `AsyncComputeTaskPool`) from the main-thread ECS spawn.
+    fn spawn_generated_map(&mut self, cfg: &LevelMapConfig, generated: &Generated) -> Entity;
 }
 
 impl LevelMapCommands for Commands<'_, '_> {
@@ -44,7 +58,11 @@ impl LevelMapCommands for Commands<'_, '_> {
     ) -> Result<Entity, GenerationError> {
         let seed = cfg.seed.unwrap_or_else(|| rng.next_seed());
         let generated = generation::generate(&cfg, seed)?;
-        Ok(spawn_generated(self, &cfg, &generated))
+        Ok(self.spawn_generated_map(&cfg, &generated))
+    }
+
+    fn spawn_generated_map(&mut self, cfg: &LevelMapConfig, generated: &Generated) -> Entity {
+        spawn_generated(self, cfg, generated)
     }
 }
 
@@ -59,6 +77,7 @@ fn spawn_generated(
             LevelMap {
                 size: g.size,
                 seed: g.seed,
+                requested_seed: g.requested_seed,
                 rotation: g.rotation,
                 y_offset: g.y_offset,
             },
@@ -221,4 +240,116 @@ fn spawn_generated(
     commands.trigger(VisitLocation { target: entry_node });
 
     root
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+
+    use crate::components::{LevelMap, MapEdge, MapNode, MapPath, Site, Waypoint};
+    use crate::config::{DesiredTraversals, LevelMapConfig};
+    use crate::generation;
+    use crate::spawn::LevelMapCommands;
+    use crate::state::LocationState;
+    use crate::{LevelMapRng, LevelSelectPlugin};
+
+    /// A structural fingerprint of a spawned map: how many of each kind
+    /// of entity exist plus the root's recorded generation parameters.
+    /// Two spawns that agree on all of these produced the same entity
+    /// graph.
+    #[derive(Debug, PartialEq)]
+    struct MapSignature {
+        nodes: usize,
+        sites: usize,
+        waypoints: usize,
+        edges: usize,
+        paths: usize,
+        states: usize,
+        seed: u64,
+        requested_seed: u64,
+        rotation: u32,
+        y_offset: u32,
+        size: (u32, u32),
+    }
+
+    fn signature(app: &mut App) -> MapSignature {
+        let world = app.world_mut();
+        let map = world
+            .query::<&LevelMap>()
+            .single(world)
+            .expect("exactly one LevelMap root")
+            .clone();
+        MapSignature {
+            nodes: world.query::<&MapNode>().iter(world).count(),
+            sites: world.query::<&Site>().iter(world).count(),
+            waypoints: world.query::<&Waypoint>().iter(world).count(),
+            edges: world.query::<&MapEdge>().iter(world).count(),
+            paths: world.query::<&MapPath>().iter(world).count(),
+            states: world.query::<&LocationState>().iter(world).count(),
+            seed: map.seed,
+            requested_seed: map.requested_seed,
+            rotation: map.rotation.to_bits(),
+            y_offset: map.y_offset.to_bits(),
+            size: (map.size.x.to_bits(), map.size.y.to_bits()),
+        }
+    }
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(LevelSelectPlugin { seed: Some(0) });
+        app
+    }
+
+    #[test]
+    fn spawn_generated_map_matches_spawn_level_map() {
+        // Seed 6 with this config exercises the internal retry chain:
+        // attempt 0 fails and attempt 1 succeeds, so the effective
+        // `seed` lands at 7 while `requested_seed` stays 6. That makes
+        // the un-offset request the interesting value to check.
+        const SEED: u64 = 6;
+        let cfg = LevelMapConfig {
+            seed: Some(SEED),
+            allow_extra_traversal: 2,
+            desired_traversals: Some(DesiredTraversals::default()),
+            ..LevelMapConfig::default()
+        };
+
+        // Path A: the all-in-one wrapper.
+        let mut app_a = test_app();
+        {
+            let cfg = cfg.clone();
+            app_a.add_systems(
+                Startup,
+                move |mut commands: Commands, mut rng: ResMut<LevelMapRng>| {
+                    commands
+                        .spawn_level_map(&mut rng, cfg.clone())
+                        .expect("map generation succeeds");
+                },
+            );
+        }
+        app_a.update();
+        let sig_a = signature(&mut app_a);
+
+        // Path B: generate up front, then spawn the pre-computed layout.
+        let generated = generation::generate(&cfg, SEED).expect("map generation succeeds");
+        let mut app_b = test_app();
+        {
+            let cfg = cfg.clone();
+            app_b.add_systems(Startup, move |mut commands: Commands| {
+                commands.spawn_generated_map(&cfg, &generated);
+            });
+        }
+        app_b.update();
+        let sig_b = signature(&mut app_b);
+
+        assert_eq!(sig_a, sig_b);
+        // The wrapper reports the un-offset request as `requested_seed`
+        // regardless of whether an internal retry shifted `seed`.
+        assert_eq!(sig_a.requested_seed, SEED);
+        // A retry fired for this seed, so the effective seed differs —
+        // demonstrating why gating on `requested_seed` is the stable
+        // choice.
+        assert_ne!(sig_a.seed, sig_a.requested_seed);
+    }
 }

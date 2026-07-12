@@ -85,8 +85,15 @@ pub struct LevelMap {
     /// Width and height (in world units) of the visible region (excludes
     /// the buffered fluff outside the camera view).
     pub size: Vec2,
-    /// Seed used for generation; useful for reproducing the layout.
+    /// Seed used for generation; useful for reproducing the layout. When
+    /// an internal retry fires this is the offset seed that actually
+    /// produced the layout, so it may differ from [`Self::requested_seed`].
     pub seed: u64,
+    /// The un-offset input seed the caller asked for (before any internal
+    /// retry offset). Stable for a given request, so consumers can gate
+    /// "do I already have this map?" on it without spuriously matching or
+    /// mismatching when a retry shifted the effective seed.
+    pub requested_seed: u64,
     /// Rotation (radians) applied during alignment.
     pub rotation: f32,
     /// Y-offset subtracted from every world-space coordinate after

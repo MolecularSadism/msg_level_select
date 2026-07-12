@@ -1,6 +1,6 @@
 [package]
 name = "msg_level_select"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Procedural FTL-style level map generator with ECS-driven traversal state."
 license = "MIT OR Apache-2.0"

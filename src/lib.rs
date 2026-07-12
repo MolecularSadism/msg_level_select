@@ -45,7 +45,7 @@ pub mod visit;
 
 pub use components::{LevelMap, MapEdge, MapNode, MapPath, Site, VoronoiCell, Waypoint};
 pub use config::{DesiredTraversals, LevelMapConfig, LevelMapPolicy};
-pub use generation::GenerationError;
+pub use generation::{Generated, GenerationError};
 pub use relationships::{EdgePaths, IncomingPaths, OutgoingPaths, PathEdges, PathFrom, PathTo};
 pub use spawn::LevelMapCommands;
 pub use state::LocationState;

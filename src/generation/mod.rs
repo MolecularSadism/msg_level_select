@@ -74,6 +74,10 @@ pub struct Generated {
     pub y_offset: f32,
     /// Seed actually used (may differ from input if retries kicked in).
     pub seed: u64,
+    /// The un-offset input seed passed to [`generate`], before any
+    /// internal retry offset. Stable for a given request regardless of
+    /// how many retries fired.
+    pub requested_seed: u64,
 }
 
 /// Geometry for one Voronoi cell, in final world coordinates.
@@ -113,7 +117,10 @@ pub fn generate(cfg: &LevelMapConfig, seed: u64) -> Result<Generated, Generation
     for attempt in 0..cfg.max_attempts {
         let try_seed = seed.wrapping_add(attempt as u64);
         match try_generate_once(cfg, try_seed) {
-            Ok(g) => return Ok(g),
+            Ok(mut g) => {
+                g.requested_seed = seed;
+                return Ok(g);
+            }
             Err(e) => {
                 last_err = e;
             }
@@ -332,5 +339,8 @@ fn try_generate_once(cfg: &LevelMapConfig, seed: u64) -> Result<Generated, Gener
         rotation: alignment.rotation,
         y_offset: y_shift,
         seed,
+        // Overwritten by `generate` with the un-offset input seed once a
+        // successful attempt is chosen.
+        requested_seed: seed,
     })
 }
