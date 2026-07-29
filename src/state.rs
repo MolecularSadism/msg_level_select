@@ -1,7 +1,7 @@
 //! `LocationState` FSM driving traversal lifecycle for nodes, paths, and edges.
 
 use bevy::prelude::*;
-use bevy_fsm::{EnumEvent, FSMState, FSMTransition};
+use bevy_fsm::{FSMState, FSMTransition};
 
 /// Lifecycle of any visitable entity (node, path, edge).
 ///
@@ -18,9 +18,7 @@ use bevy_fsm::{EnumEvent, FSMState, FSMTransition};
 /// - `Available` -> `Active` | `Visited`
 /// - `Active`    -> `Visited`
 /// - `Visited`   -> `Active` (revisit only)
-#[derive(
-    Component, EnumEvent, FSMState, Reflect, Clone, Copy, Debug, PartialEq, Eq, Hash, Default,
-)]
+#[derive(Component, FSMState, Reflect, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 #[reflect(Component)]
 pub enum LocationState {
     #[default]

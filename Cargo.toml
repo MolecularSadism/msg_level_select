@@ -14,7 +14,7 @@ dev = ["dep:bevy-inspector-egui"]
 
 [dependencies]
 bevy = "0.18"
-bevy_fsm = "0.3.0"
+bevy_fsm = "0.5"
 voronoice = "0.2"
 rand = "0.10"
 thiserror = "2"
