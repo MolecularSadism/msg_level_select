@@ -8,14 +8,15 @@ use bevy_fsm::{FSMState, FSMTransition};
 /// Priority (high → low): `Visited` > `Active` > `Available` > `Inactive`.
 /// Once `Visited`, an entity may only re-enter `Active` (a revisit, gated by
 /// [`crate::LevelMapPolicy`]). It is never demoted to `Available` or
-/// `Inactive`. The traversal observer uses a `try_promote` helper to enforce
-/// this priority — the FSM transitions below are the underlying validation
-/// layer that admits any move *up* the priority ladder (plus the revisit
-/// escape from `Visited`).
+/// `Inactive`. The traversal observer uses a `try_promote` helper to move
+/// entities *up* the priority ladder and a `try_retract` helper for the one
+/// downward move — `Available` -> `Inactive`, which reclaims the corridors
+/// leaving a node the player has moved past. The FSM transitions below are
+/// the underlying validation layer.
 ///
 /// Transitions allowed:
 /// - `Inactive` -> `Available` | `Active` | `Visited`
-/// - `Available` -> `Active` | `Visited`
+/// - `Available` -> `Active` | `Visited` | `Inactive` (retraction)
 /// - `Active`    -> `Visited`
 /// - `Visited`   -> `Active` (revisit only)
 #[derive(Component, FSMState, Reflect, Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -39,6 +40,7 @@ impl FSMTransition for LocationState {
                     | (Inactive, Visited)
                     | (Available, Active)
                     | (Available, Visited)
+                    | (Available, Inactive)
                     | (Active, Visited)
                     | (Visited, Active)
             )
