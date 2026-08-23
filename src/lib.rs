@@ -15,6 +15,24 @@
 //! override the per-map seed; otherwise the spawn pulls a fresh sub-seed
 //! from the resource.
 //!
+//! # Restoring a run
+//!
+//! A consumer that persists which `(belt, site)` keys a run has completed
+//! can trigger [`RestoreTraversal`] after respawning the map to rebuild
+//! the traversal state — completed sites `Visited`, the current position
+//! `Active` with its outgoing corridor lit. See the [`restore`] module
+//! docs for exactly what is (and is not) reproduced.
+//!
+//! # Feature flags
+//!
+//! - `serde` — derives `Serialize`/`Deserialize` on [`LevelMapConfig`],
+//!   [`DesiredTraversals`], and [`LevelMapPolicy`] (struct-level
+//!   `#[serde(default)]` backed by the `Default` impls, so partial config
+//!   files work), letting a consumer embed the config in its own files.
+//! - `dev` — enables the `bevy-inspector-egui` dependency the interactive
+//!   example requires, plus the entropy-seeded conveniences
+//!   (`LevelMapRng::from_entropy` and the plugin's `Default` impl).
+//!
 //! # Quick start
 //!
 //! ```
@@ -43,6 +61,9 @@ pub mod restore;
 pub mod spawn;
 pub mod state;
 pub mod visit;
+
+#[cfg(test)]
+pub(crate) mod test_util;
 
 pub use components::{LevelMap, MapEdge, MapNode, MapPath, Site, VoronoiCell, Waypoint};
 pub use config::{DesiredTraversals, LevelMapConfig, LevelMapPolicy};
@@ -90,9 +111,17 @@ impl LevelMapRng {
 }
 
 /// Adds the [`LocationState`] FSM, registers types for reflection,
-/// installs the [`VisitLocation`] observer, and provisions the
-/// [`LevelMapRng`] resource used to seed map generation.
-#[derive(Default)]
+/// installs the [`VisitLocation`] and [`RestoreTraversal`] observers, and
+/// provisions the [`LevelMapRng`] resource used to seed map generation.
+///
+/// # Panics
+///
+/// Building the plugin with `seed: None` draws OS entropy, which is only
+/// supported with the `dev` feature (demos and examples); without it,
+/// [`Plugin::build`] panics. The `Default` impl (which leaves `seed`
+/// `None`) is therefore only derived with the `dev` feature — release
+/// consumers must construct the plugin with an explicit seed.
+#[cfg_attr(feature = "dev", derive(Default))]
 pub struct LevelSelectPlugin {
     /// Master seed for the [`LevelMapRng`] resource. Pick a fixed value
     /// to make every run produce the same sequence of maps. `None` draws
