@@ -292,7 +292,7 @@ fn apply_decision(
 
 /// Promote every edge of `path` and every node those edges touch to
 /// `target`, deferring to [`try_promote`] for priority discipline.
-fn propagate_corridor(
+pub(crate) fn propagate_corridor(
     commands: &mut Commands,
     path: Entity,
     q_path_edges: &Query<&PathEdges>,
@@ -316,7 +316,7 @@ fn propagate_corridor(
 /// deferring to [`try_retract`] for priority discipline. Entities in `keep`
 /// (the new active node's forward reach) are skipped so a corridor shared
 /// between the retracted route and the committed route stays `Available`.
-fn retract_corridor(
+pub(crate) fn retract_corridor(
     commands: &mut Commands,
     path: Entity,
     q_path_edges: &Query<&PathEdges>,
@@ -347,7 +347,7 @@ fn retract_corridor(
 /// Gather `path`, its edges, and the nodes those edges touch into `out`.
 /// Mirrors the walk in [`propagate_corridor`] without issuing any state
 /// change — used to record the corridors the new active node lights forward.
-fn collect_corridor(
+pub(crate) fn collect_corridor(
     path: Entity,
     q_path_edges: &Query<&PathEdges>,
     q_map_edge: &Query<&MapEdge>,
@@ -375,7 +375,7 @@ fn collect_corridor(
 /// Entities without a [`LocationState`] component (dead Voronoi cells, dead
 /// adjacency edges) are silently skipped — they are not part of any
 /// traversable corridor.
-fn try_promote(
+pub(crate) fn try_promote(
     commands: &mut Commands,
     entity: Entity,
     q_state: &Query<&LocationState>,
