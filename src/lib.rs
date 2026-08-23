@@ -19,9 +19,9 @@
 //!
 //! A consumer that persists which `(belt, site)` keys a run has completed
 //! can trigger [`RestoreTraversal`] after respawning the map to rebuild
-//! the traversal state — completed sites `Visited`, the current position
-//! `Active` with its outgoing corridor lit. See the [`restore`] module
-//! docs for exactly what is (and is not) reproduced.
+//! the live traversal state — completed sites and the traveled corridor
+//! trail `Visited`, the current position `Active` with its outgoing
+//! corridor lit. See the [`restore`] module docs for the full contract.
 //!
 //! # Feature flags
 //!

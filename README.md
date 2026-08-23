@@ -105,10 +105,11 @@ commands.trigger(RestoreTraversal {
 });
 ```
 
-Restoration reproduces the run's *positional* state — completed site nodes `Visited`, the
-current position `Active` with its outgoing corridor lit `Available`, stale entry-sibling
-corridors retracted to `Inactive` — but not the corridor trail: traveled paths, edges, and
-waypoints are not promoted to `Visited`. See the `restore` module docs for the full contract.
+Restoration reproduces the live traversal state — completed site nodes and the traveled
+corridor trail (paths, edges, waypoints) `Visited`, the current position `Active` with its
+outgoing corridor lit `Available`, stale entry-sibling corridors retracted to `Inactive` —
+exactly what the same hops leave behind live. See the `restore` module docs for the full
+contract.
 
 ### LevelMapPolicy
 

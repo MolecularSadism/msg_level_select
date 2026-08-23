@@ -3,19 +3,21 @@
 //!
 //! A consumer that persists which sites a run has completed can hand that
 //! history back as a [`RestoreTraversal`] event on each map open.
-//! Restoration reproduces the run's *positional* state: completed site
-//! nodes `Visited`, the current position `Active` with its outgoing
-//! corridor lit `Available`, and the stale sibling corridors the spawn
-//! pipeline lit from the entry node retracted to `Inactive` — mirroring
-//! the retraction the live [`VisitLocation`](crate::VisitLocation)
-//! observer performs on each hop.
+//! Restoration reproduces the live traversal state: completed site nodes
+//! `Visited`, the corridor trail between consecutive completed sites —
+//! paths, edges, and interior waypoints — `Visited`, the current position
+//! `Active` with its outgoing corridor lit `Available`, and the stale
+//! sibling corridors the spawn pipeline lit from the entry node retracted
+//! to `Inactive` — exactly the state the live
+//! [`VisitLocation`](crate::VisitLocation) observer leaves behind after
+//! the same hops. A consumer that renders `Visited` corridors as a
+//! breadcrumb trail sees that trail after a restore.
 //!
-//! What restoration does *not* reproduce is the corridor trail: the paths,
-//! edges, and interior waypoints the run traveled through are retracted
-//! (or left at their spawn-time `Inactive`) along with the unchosen
-//! siblings, not promoted to `Visited`. A consumer that renders `Visited`
-//! corridors as a breadcrumb trail will not see that trail after a
-//! restore — only the completed site nodes carry `Visited`.
+//! The trail is reconstructed along the sorted `(belt, site)` key order of
+//! the history, so a run that teleported or hopped out of key order gets
+//! the monotone-forward trail for the same set of sites; a consecutive
+//! pair with no connecting path (a teleported hop) simply contributes no
+//! corridor.
 //!
 //! Restoration writes through the same [`try_promote`]/[`try_retract`]
 //! priority discipline as live traversal rather than replaying
@@ -28,9 +30,11 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use crate::components::{MapEdge, MapNode, Site};
-use crate::relationships::{OutgoingPaths, PathEdges};
+use crate::relationships::{IncomingPaths, OutgoingPaths, PathEdges, PathFrom, PathTo};
 use crate::state::LocationState;
-use crate::visit::{collect_corridor, propagate_corridor, retract_corridor, try_promote};
+use crate::visit::{
+    collect_corridor, propagate_corridor, resolve_path_between, retract_corridor, try_promote,
+};
 
 /// Request to rebuild traversal state on the map under `root` from a set of
 /// completed site keys.
@@ -46,9 +50,13 @@ use crate::visit::{collect_corridor, propagate_corridor, retract_corridor, try_p
 /// 1. demotes the entry node to `Visited` (unless it is the current
 ///    position),
 /// 2. marks every completed site other than the current position `Visited`,
-/// 3. promotes the current position to `Active` and lights its outgoing
+/// 3. marks the corridor trail `Visited`: for each consecutive pair of the
+///    sorted history (entry, completed sites, and the current position),
+///    the connecting path, its edges, and its interior waypoints — the
+///    same promotion a live hop performs,
+/// 4. promotes the current position to `Active` and lights its outgoing
 ///    paths, their edges, and their waypoints `Available`,
-/// 4. retracts the corridors leaving every passed site (the entry node and
+/// 5. retracts the corridors leaving every passed site (the entry node and
 ///    each other completed site) that the current position does not
 ///    re-light, so only the current node's successors stay `Available` —
 ///    sibling retraction, exactly as a live hop performs it.
@@ -79,11 +87,14 @@ pub fn current_site_key(completed: &[(u32, u32)]) -> (u32, u32) {
     completed.iter().max().copied().unwrap_or((0, 0))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn on_restore_traversal(
     trigger: On<RestoreTraversal>,
     mut commands: Commands,
     q_sites: Query<(Entity, &Site, &ChildOf), With<MapNode>>,
     q_outgoing: Query<&OutgoingPaths>,
+    q_incoming: Query<&IncomingPaths>,
+    q_path_endpoints: Query<(&PathFrom, &PathTo)>,
     q_path_edges: Query<&PathEdges>,
     q_map_edge: Query<&MapEdge>,
     q_state: Query<&LocationState>,
@@ -157,7 +168,54 @@ pub(crate) fn on_restore_traversal(
         try_promote(&mut commands, entity, &q_state, LocationState::Visited);
     }
 
-    // Current position becomes Active.
+    // Everything this restore promotes — the trail below, the nodes above,
+    // and the corridor lit forward from the current position — is recorded
+    // in `forward` so the retraction pass never dims a corridor the run
+    // keeps (a shared edge or waypoint) and never targets an entity whose
+    // promotion is still in flight.
+    let mut forward: HashSet<Entity> = HashSet::new();
+    forward.insert(entry_entity);
+    forward.insert(current_entity);
+    forward.extend(passed_sites.iter().copied());
+
+    // Rebuild the corridor trail: walk consecutive pairs of the sorted
+    // history (entry included) and mark each connecting path, its edges,
+    // and its waypoints Visited — the same promotion a live hop performs.
+    // A pair with no connecting path contributes no corridor.
+    let mut chain_keys = completed.clone();
+    if !chain_keys.contains(&current_key) {
+        chain_keys.push(current_key);
+        chain_keys.sort_unstable();
+    }
+    let chain: Vec<Entity> = std::iter::once(entry_entity)
+        .chain(
+            chain_keys
+                .iter()
+                .filter(|&&key| key != (0, 0))
+                .filter_map(|key| site_map.get(key).copied()),
+        )
+        .collect();
+    for pair in chain.windows(2) {
+        let Some(path) =
+            resolve_path_between(Some(pair[0]), pair[1], &q_incoming, &q_path_endpoints)
+        else {
+            continue;
+        };
+        try_promote(&mut commands, path, &q_state, LocationState::Visited);
+        collect_corridor(path, &q_path_edges, &q_map_edge, &mut forward);
+        propagate_corridor(
+            &mut commands,
+            path,
+            &q_path_edges,
+            &q_map_edge,
+            &q_state,
+            LocationState::Visited,
+        );
+    }
+
+    // Current position becomes Active. Runs after the trail promotion so
+    // the revisit transition (Visited -> Active) handles the corridor walk
+    // having promoted the current node as a trail endpoint.
     try_promote(
         &mut commands,
         current_entity,
@@ -166,14 +224,7 @@ pub(crate) fn on_restore_traversal(
     );
 
     // Light up the corridor leaving the current position so the player can
-    // pick a successor. Every entity lit here — and every node this restore
-    // just promoted — is recorded in `forward` so the retraction below never
-    // dims a corridor the current node re-lights (a shared edge or waypoint)
-    // and never targets a node whose promotion is still in flight.
-    let mut forward: HashSet<Entity> = HashSet::new();
-    forward.insert(entry_entity);
-    forward.insert(current_entity);
-    forward.extend(passed_sites.iter().copied());
+    // pick a successor.
     if let Ok(outgoing) = q_outgoing.get(current_entity) {
         for path in outgoing.iter() {
             forward.insert(path);
@@ -296,9 +347,10 @@ mod tests {
         assert_eq!(state_of(world, path_bd), LocationState::Available);
         assert_eq!(state_of(world, edge_bd), LocationState::Available);
 
-        // The entry corridor the run did traverse is no longer left dangling
-        // as a reachable option either.
-        assert_eq!(state_of(world, path_eb), LocationState::Inactive);
+        // The entry corridor the run did traverse carries the trail, exactly
+        // as a live hop leaves it.
+        assert_eq!(state_of(world, path_eb), LocationState::Visited);
+        assert_eq!(state_of(world, edge_eb), LocationState::Visited);
     }
 
     /// Intermediate completed sites become `Visited`, and only the current
@@ -318,7 +370,7 @@ mod tests {
         let edge_bc = edge(world, root, b, c, LocationState::Inactive);
         let edge_cd = edge(world, root, c, d, LocationState::Inactive);
 
-        let _path_eb = path(
+        let path_eb = path(
             world,
             root,
             entry,
@@ -326,7 +378,7 @@ mod tests {
             vec![edge_eb],
             LocationState::Available,
         );
-        let _path_bc = path(world, root, b, c, vec![edge_bc], LocationState::Inactive);
+        let path_bc = path(world, root, b, c, vec![edge_bc], LocationState::Inactive);
         let path_cd = path(world, root, c, d, vec![edge_cd], LocationState::Inactive);
 
         world.trigger(RestoreTraversal {
@@ -342,6 +394,12 @@ mod tests {
         assert_eq!(state_of(world, c), LocationState::Active);
         assert_eq!(state_of(world, d), LocationState::Available);
         assert_eq!(state_of(world, path_cd), LocationState::Available);
+
+        // The traveled corridors carry the trail, hop by hop.
+        assert_eq!(state_of(world, path_eb), LocationState::Visited);
+        assert_eq!(state_of(world, edge_eb), LocationState::Visited);
+        assert_eq!(state_of(world, path_bc), LocationState::Visited);
+        assert_eq!(state_of(world, edge_bc), LocationState::Visited);
     }
 
     /// An empty history leaves the spawn-time state untouched: the entry is
@@ -419,13 +477,14 @@ mod tests {
         assert_eq!(state_of(world, b), LocationState::Active);
         assert_eq!(state_of(world, c), LocationState::Visited);
 
-        // Only the current node's corridor lights up; the visited node's own
-        // successors stay dark, and the traveled entry corridor retracts.
-        assert_eq!(state_of(world, path_bc), LocationState::Available);
-        assert_eq!(state_of(world, edge_bc), LocationState::Available);
+        // The whole traveled trail — entry->B and B->C — is Visited, sticky
+        // over the Available the current node re-lights forward; the visited
+        // node's own successors stay dark.
+        assert_eq!(state_of(world, path_eb), LocationState::Visited);
+        assert_eq!(state_of(world, path_bc), LocationState::Visited);
+        assert_eq!(state_of(world, edge_bc), LocationState::Visited);
         assert_eq!(state_of(world, d), LocationState::Inactive);
         assert_eq!(state_of(world, path_cd), LocationState::Inactive);
-        assert_eq!(state_of(world, path_eb), LocationState::Inactive);
     }
 
     /// An edge shared between a retracted entry sibling and the current
@@ -481,8 +540,9 @@ mod tests {
         assert_eq!(state_of(world, shared), LocationState::Available);
         assert_eq!(state_of(world, c), LocationState::Available);
         assert_eq!(state_of(world, path_bc), LocationState::Available);
-        // The traveled entry corridor retracts as usual.
-        assert_eq!(state_of(world, path_eb), LocationState::Inactive);
+        // The traveled entry corridor carries the trail.
+        assert_eq!(state_of(world, path_eb), LocationState::Visited);
+        assert_eq!(state_of(world, edge_eb), LocationState::Visited);
     }
 
     /// A history that explicitly lists the entry key `(0, 0)` restores
@@ -528,7 +588,7 @@ mod tests {
         assert_eq!(state_of(world, entry), LocationState::Visited);
         assert_eq!(state_of(world, b), LocationState::Active);
         assert_eq!(state_of(world, c), LocationState::Inactive);
-        assert_eq!(state_of(world, path_eb), LocationState::Inactive);
+        assert_eq!(state_of(world, path_eb), LocationState::Visited);
         assert_eq!(state_of(world, path_ec), LocationState::Inactive);
     }
 

@@ -201,7 +201,7 @@ fn classify_target(
 /// Find an incoming path to `dest` that originates from `previous_active`.
 /// Returns `None` if either input is missing or no such path exists — the
 /// caller then treats the move as a teleport candidate.
-fn resolve_path_between(
+pub(crate) fn resolve_path_between(
     previous_active: Option<Entity>,
     dest: Entity,
     q_incoming: &Query<&IncomingPaths>,
