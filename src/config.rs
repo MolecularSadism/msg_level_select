@@ -4,6 +4,8 @@ use bevy::prelude::*;
 
 /// Generation + runtime configuration for one map.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct LevelMapConfig {
     /// `L(0)..L(S-1)`. The first value is the entry-level count, the
     /// last is the exit-level count. Must contain at least 2 entries.
@@ -79,12 +81,18 @@ impl Default for LevelMapConfig {
 
 /// Optional: inflate every path with extra waypoint cells.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct DesiredTraversals {
     /// Average number of intermediate waypoints per path.
     pub average: u8,
     /// Maps `t in [0,1]` to a multiplier in `[0,1]`. The actual count
     /// is `round(easing.sample(t) * 2 * average)`. The default uses an
     /// approximation of a Gaussian via a smooth-step S-curve.
+    ///
+    /// Not serializable; deserialized configs always get the default
+    /// curve (files configure [`Self::average`] only).
+    #[cfg_attr(feature = "serde", serde(skip, default = "default_easing"))]
     pub easing: EasingCurve<f32>,
 }
 
@@ -92,11 +100,15 @@ impl Default for DesiredTraversals {
     fn default() -> Self {
         Self {
             average: 1,
-            // SmoothStep approximates the integral of a Gaussian: sampling uniform
-            // `t` and applying it concentrates outputs around 0.5.
-            easing: EasingCurve::new(0.0, 1.0, EaseFunction::SmoothStep),
+            easing: default_easing(),
         }
     }
+}
+
+/// SmoothStep approximates the integral of a Gaussian: sampling uniform
+/// `t` and applying it concentrates outputs around 0.5.
+fn default_easing() -> EasingCurve<f32> {
+    EasingCurve::new(0.0, 1.0, EaseFunction::SmoothStep)
 }
 
 /// Runtime traversal policy. Lives on the [`crate::LevelMap`] root
@@ -104,6 +116,8 @@ impl Default for DesiredTraversals {
 /// [`crate::VisitLocation`] will see the new value.
 #[derive(Component, Reflect, Clone, Copy, Debug)]
 #[reflect(Component)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct LevelMapPolicy {
     /// When `false`, a node already in `Visited` may not transition
     /// back to `Active`; a clicked-revisit is rejected with a `warn!`.

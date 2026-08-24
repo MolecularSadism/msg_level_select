@@ -10,10 +10,28 @@
 //! # Seeding
 //!
 //! The plugin owns a master [`LevelMapRng`] resource. Add it with a
-//! fixed seed for run-to-run determinism, or leave the seed `None` to
-//! draw entropy from the OS at app start. Each [`LevelMapConfig`] may
+//! fixed seed for run-to-run determinism (leaving the seed `None` to
+//! draw OS entropy is a `dev`-feature-only convenience for demos). Each [`LevelMapConfig`] may
 //! override the per-map seed; otherwise the spawn pulls a fresh sub-seed
 //! from the resource.
+//!
+//! # Restoring a run
+//!
+//! A consumer that persists which `(belt, site)` keys a run has completed
+//! can trigger [`RestoreTraversal`] after respawning the map to rebuild
+//! the live traversal state — completed sites and the traveled corridor
+//! trail `Visited`, the current position `Active` with its outgoing
+//! corridor lit. See the [`restore`] module docs for the full contract.
+//!
+//! # Feature flags
+//!
+//! - `serde` — derives `Serialize`/`Deserialize` on [`LevelMapConfig`],
+//!   [`DesiredTraversals`], and [`LevelMapPolicy`] (struct-level
+//!   `#[serde(default)]` backed by the `Default` impls, so partial config
+//!   files work), letting a consumer embed the config in its own files.
+//! - `dev` — enables the `bevy-inspector-egui` dependency the interactive
+//!   example requires, plus the entropy-seeded conveniences
+//!   (`LevelMapRng::from_entropy` and the plugin's `Default` impl).
 //!
 //! # Quick start
 //!
@@ -39,14 +57,19 @@ pub mod components;
 pub mod config;
 pub mod generation;
 pub mod relationships;
+pub mod restore;
 pub mod spawn;
 pub mod state;
 pub mod visit;
+
+#[cfg(test)]
+pub(crate) mod test_util;
 
 pub use components::{LevelMap, MapEdge, MapNode, MapPath, Site, VoronoiCell, Waypoint};
 pub use config::{DesiredTraversals, LevelMapConfig, LevelMapPolicy};
 pub use generation::{Generated, GenerationError};
 pub use relationships::{EdgePaths, IncomingPaths, OutgoingPaths, PathEdges, PathFrom, PathTo};
+pub use restore::{RestoreTraversal, current_site_key};
 pub use spawn::{LevelMapCommands, LevelMapSpawner, SpawnProgress};
 pub use state::LocationState;
 pub use visit::VisitLocation;
@@ -70,6 +93,12 @@ impl LevelMapRng {
     }
 
     /// Construct a new RNG from OS entropy.
+    ///
+    /// **Determinism trap** — a map seeded this way is different every run,
+    /// which is never what a consumer whose maps must be seed-stable wants.
+    /// Only available with the `dev` feature, for demos and examples; use
+    /// [`Self::from_seed`] everywhere else.
+    #[cfg(feature = "dev")]
     pub fn from_entropy() -> Self {
         Self(StdRng::seed_from_u64(rand::rng().random()))
     }
@@ -82,13 +111,22 @@ impl LevelMapRng {
 }
 
 /// Adds the [`LocationState`] FSM, registers types for reflection,
-/// installs the [`VisitLocation`] observer, and provisions the
-/// [`LevelMapRng`] resource used to seed map generation.
-#[derive(Default)]
+/// installs the [`VisitLocation`] and [`RestoreTraversal`] observers, and
+/// provisions the [`LevelMapRng`] resource used to seed map generation.
+///
+/// # Panics
+///
+/// Building the plugin with `seed: None` draws OS entropy, which is only
+/// supported with the `dev` feature (demos and examples); without it,
+/// [`Plugin::build`] panics. The `Default` impl (which leaves `seed`
+/// `None`) is therefore only derived with the `dev` feature — release
+/// consumers must construct the plugin with an explicit seed.
+#[cfg_attr(feature = "dev", derive(Default))]
 pub struct LevelSelectPlugin {
-    /// Master seed for the [`LevelMapRng`] resource. `None` draws OS
-    /// entropy at plugin build time — pick a fixed value here to make
-    /// every run produce the same sequence of maps.
+    /// Master seed for the [`LevelMapRng`] resource. Pick a fixed value
+    /// to make every run produce the same sequence of maps. `None` draws
+    /// OS entropy at plugin build time and is only supported with the
+    /// `dev` feature (demos); without it, `None` panics at build.
     pub seed: Option<u64>,
 }
 
@@ -96,7 +134,14 @@ impl Plugin for LevelSelectPlugin {
     fn build(&self, app: &mut App) {
         let rng = match self.seed {
             Some(s) => LevelMapRng::from_seed(s),
+            #[cfg(feature = "dev")]
             None => LevelMapRng::from_entropy(),
+            #[cfg(not(feature = "dev"))]
+            None => panic!(
+                "LevelSelectPlugin {{ seed: None }} draws OS entropy, which makes every run's \
+                 maps different — a determinism trap. Pass a fixed seed, or enable the `dev` \
+                 feature for demos."
+            ),
         };
         app.insert_resource(rng)
             .add_plugins(FSMPlugin::<LocationState>::default())
@@ -115,6 +160,7 @@ impl Plugin for LevelSelectPlugin {
             .register_type::<OutgoingPaths>()
             .register_type::<PathTo>()
             .register_type::<IncomingPaths>()
-            .add_observer(visit::on_visit_location);
+            .add_observer(visit::on_visit_location)
+            .add_observer(restore::on_restore_traversal);
     }
 }

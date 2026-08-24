@@ -90,6 +90,27 @@ The observer automatically:
 3. Promotes the destination to `Active`.
 4. Cascades outgoing paths, their edges, and waypoints to `Available`.
 
+### Restoring a run
+
+A consumer that persists which `(belt, site)` keys a run has completed can rebuild the traversal
+state after respawning the map by triggering `RestoreTraversal`:
+
+```rust
+commands.trigger(RestoreTraversal {
+    root: map_root,
+    completed: vec![(1, 0), (2, 1)],
+    // None infers the current position as the highest completed key;
+    // a run that teleported or revisited backward must name it.
+    current: None,
+});
+```
+
+Restoration reproduces the live traversal state — completed site nodes and the traveled
+corridor trail (paths, edges, waypoints) `Visited`, the current position `Active` with its
+outgoing corridor lit `Available`, stale entry-sibling corridors retracted to `Inactive` —
+exactly what the same hops leave behind live. See the `restore` module docs for the full
+contract.
+
 ### LevelMapPolicy
 
 `LevelMapPolicy` lives on the root `LevelMap` entity and can be mutated at any time without
@@ -206,6 +227,13 @@ fn path_edges(q: Query<&PathEdges, With<MapPath>>) {
 // Paths that cross a given edge.
 fn edge_paths(q: Query<&EdgePaths, With<MapEdge>>) { /* ... */ }
 ```
+
+## Feature flags
+
+| Feature | Effect |
+|---------|--------|
+| `serde` | Derives `Serialize`/`Deserialize` on `LevelMapConfig`, `DesiredTraversals`, and `LevelMapPolicy` (struct-level `#[serde(default)]` backed by the `Default` impls, so partial config files work). The non-serializable easing curve always deserializes to its default. |
+| `dev` | Enables `bevy-inspector-egui` for the interactive example, plus the entropy-seeded conveniences: `LevelMapRng::from_entropy` and the plugin's `Default` impl. Without it, `LevelSelectPlugin` must be built with an explicit seed. |
 
 ## Example
 

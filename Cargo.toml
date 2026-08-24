@@ -11,15 +11,22 @@ readme = "README.md"
 
 [features]
 dev = ["dep:bevy-inspector-egui"]
+# Derive `Serialize`/`Deserialize` on the config types (struct-level
+# `#[serde(default)]` backed by the `Default` impls), so a game can embed
+# `LevelMapConfig` directly in its own config files.
+serde = ["dep:serde"]
 
 [dependencies]
 bevy = "0.18"
-# Re-pin to `"0.5.0"` once that release is on crates.io (0.4.0 is the latest published
-# version and requires Bevy 0.19).
-bevy_fsm = { git = "https://github.com/MolecularSadism/bevy_fsm", branch = "main" }
+bevy_fsm = "0.5.0"
 voronoice = "0.2"
 rand = "0.10"
+serde = { version = "1", features = ["derive"], optional = true }
 thiserror = "2"
+
+[dev-dependencies]
+# Round-trip and partial-deserialize tests for the `serde` feature.
+ron = "0.10"
 
 [dependencies.bevy-inspector-egui]
 version = "0.36"
