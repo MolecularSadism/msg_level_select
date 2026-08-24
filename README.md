@@ -9,13 +9,13 @@ the consumer.
 
 | msg_level_select | Bevy |
 |------------------|------|
-| 0.1, 0.2         | 0.18 |
+| 0.1, 0.2, 0.3    | 0.18 |
 
 ## Usage
 
 ```toml
 [dependencies]
-msg_level_select = { git = "https://github.com/MolecularSadism/msg_level_select", tag = "v0.1.0" }
+msg_level_select = { git = "https://github.com/MolecularSadism/msg_level_select", tag = "v0.3.0" }
 ```
 
 ## Quick start
@@ -187,6 +187,24 @@ app.add_plugins(LevelSelectPlugin { seed: Some(0) });
 
 // This specific map always generates identically.
 commands.spawn_level_map(&mut rng, LevelMapConfig { seed: Some(99), ..default() });
+```
+
+### Retrying an unsatisfiable layout
+
+`generate`'s `max_attempts` re-seeds one fixed `layout` — it can't escape a layout that's
+structurally unsatisfiable (too many sites for the configured bounds). `generation::generate_with_retry`
+adds an outer retry that also re-rolls the layout itself, falling back to a guaranteed
+one-site-per-belt linear layout if every honest round is exhausted:
+
+```rust
+use msg_level_select::generation::generate_with_retry;
+
+let stage_count = 6;
+let result = generate_with_retry(&base_cfg, requested_seed, stage_count, 64, |rng| {
+    // Draw this round's per-stage site counts, e.g. from configured ranges.
+    (0..stage_count).map(|_| rng.random_range(1..=3)).collect()
+});
+let (cfg, generated) = result.expect("linear fallback guarantees a result");
 ```
 
 ## Relationship queries
