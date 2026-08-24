@@ -132,6 +132,87 @@ pub fn generate(cfg: &LevelMapConfig, seed: u64) -> Result<Generated, Generation
     }
 }
 
+/// Deterministically find a layout+seed [`generate`] can satisfy, retrying
+/// across independent layout/seed regions rather than just [`LevelMapConfig::max_attempts`]
+/// re-seeds of one fixed layout.
+///
+/// `layout_of` draws the `[stage_0_sites, stage_1_sites, ...]` layout for
+/// one round from the round's own [`StdRng`] (e.g. sampling each stage's
+/// site count from a configured range) — a fixed layout can be
+/// unsatisfiable for structural reasons `max_attempts` re-seeding alone
+/// can't escape. `stage_count` is the number of belts `layout_of` produces;
+/// it seeds the guaranteed fallback and must match the length of every
+/// vec `layout_of` returns.
+///
+/// Round 0 re-mixes nothing, so a `requested_seed` that already generated
+/// keeps its exact map. Each later round (up to `rounds`) draws an
+/// independent seed region via [`reseed`] and re-rolls the layout, so a
+/// single unsatisfiable layout can never wedge the caller. If every
+/// honest round is exhausted, a single-site-per-belt linear layout —
+/// trivially satisfiable for any sane bounds — is retried the same way as
+/// a guaranteed fallback.
+///
+/// Returns the [`LevelMapConfig`] that satisfied the layout (`layout` and
+/// `seed` filled in; every other field copied from `base_cfg`) alongside
+/// the [`Generated`] result. `Generated::requested_seed` is stamped with
+/// `requested_seed` regardless of which round or fallback won, so a
+/// caller keying off it sees the stable input seed rather than the
+/// (possibly retried or reseeded) effective one.
+pub fn generate_with_retry(
+    base_cfg: &LevelMapConfig,
+    requested_seed: u64,
+    stage_count: usize,
+    rounds: u32,
+    mut layout_of: impl FnMut(&mut StdRng) -> Vec<u32>,
+) -> Option<(LevelMapConfig, Generated)> {
+    let make_cfg = |layout: Vec<u32>, seed: u64| LevelMapConfig {
+        layout,
+        seed: Some(seed),
+        ..base_cfg.clone()
+    };
+    let finish = |cfg: LevelMapConfig, mut generated: Generated| {
+        generated.requested_seed = requested_seed;
+        (cfg, generated)
+    };
+
+    for round in 0..rounds {
+        let round_seed = reseed(requested_seed, round);
+        let mut layout_rng = StdRng::seed_from_u64(round_seed.wrapping_add(1));
+        let layout = layout_of(&mut layout_rng);
+        let cfg = make_cfg(layout, round_seed);
+        if let Ok(generated) = generate(&cfg, round_seed) {
+            return Some(finish(cfg, generated));
+        }
+    }
+
+    // Guaranteed fallback: one site per belt is a plain connected path
+    // `generate` can satisfy for any sane bounds. Still deterministic.
+    let linear_layout = vec![1u32; stage_count];
+    for round in 0..rounds {
+        let round_seed = reseed(requested_seed, round);
+        let cfg = make_cfg(linear_layout.clone(), round_seed);
+        if let Ok(generated) = generate(&cfg, round_seed) {
+            return Some(finish(cfg, generated));
+        }
+    }
+
+    None
+}
+
+/// Derive the deterministic seed for re-seed `round`. Round 0 returns
+/// `base` unchanged so seeds that already generated keep their map; later
+/// rounds run `base` through the splitmix64 finalizer for a
+/// well-distributed, independent seed region.
+fn reseed(base: u64, round: u32) -> u64 {
+    if round == 0 {
+        return base;
+    }
+    let mut z = base.wrapping_add((round as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 fn try_generate_once(cfg: &LevelMapConfig, seed: u64) -> Result<Generated, GenerationError> {
     let mut rng = StdRng::seed_from_u64(seed);
 
@@ -343,4 +424,65 @@ fn try_generate_once(cfg: &LevelMapConfig, seed: u64) -> Result<Generated, Gener
         // successful attempt is chosen.
         requested_seed: seed,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_zero_preserves_base_seed() {
+        // Round 0 must reproduce the pre-escalation map, so seeds that
+        // already generated keep their exact layout.
+        for base in [0u64, 1, 42, u64::MAX, 0xDEAD_BEEF] {
+            assert_eq!(reseed(base, 0), base);
+        }
+    }
+
+    #[test]
+    fn later_rounds_are_distinct_and_deterministic() {
+        let base = 42;
+        let mut seen = std::collections::HashSet::new();
+        for round in 0..64 {
+            let seed = reseed(base, round);
+            assert_eq!(seed, reseed(base, round), "reseed must be deterministic");
+            assert!(
+                seen.insert(seed),
+                "round {round} collided with an earlier seed"
+            );
+        }
+    }
+
+    /// A satisfiable layout eventually succeeds within the honest rounds
+    /// (`generate`'s own `max_attempts` retry may still fail a given round
+    /// for an unlucky seed), and the returned config/[`Generated`] always
+    /// report the caller's `requested_seed`, whichever round or fallback won.
+    #[test]
+    fn generate_with_retry_succeeds_for_a_satisfiable_layout() {
+        let base_cfg = LevelMapConfig::default();
+        let layout = base_cfg.layout.clone();
+        let stage_count = layout.len();
+
+        let result = generate_with_retry(&base_cfg, 42, stage_count, 8, |_rng| layout.clone());
+
+        let (cfg, generated) = result.expect("default layout is satisfiable within 8 rounds");
+        assert_eq!(cfg.layout, base_cfg.layout);
+        assert_eq!(generated.requested_seed, 42);
+    }
+
+    /// A layout `generate` immediately rejects as too short (fewer than 2
+    /// stages) fails every honest round regardless of round or seed, so
+    /// `generate_with_retry` falls back to the guaranteed one-site-per-belt
+    /// linear layout for the caller's `stage_count`.
+    #[test]
+    fn generate_with_retry_falls_back_to_a_linear_layout() {
+        let base_cfg = LevelMapConfig::default();
+        let stage_count = 2;
+
+        let result = generate_with_retry(&base_cfg, 7, stage_count, 4, |_rng| vec![1]);
+
+        let (cfg, generated) = result.expect("linear fallback guarantees a result");
+        assert_eq!(cfg.layout, vec![1, 1]);
+        assert_eq!(generated.requested_seed, 7);
+    }
 }

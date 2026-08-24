@@ -3488,7 +3488,7 @@ dependencies = [
 
 [[package]]
 name = "msg_level_select"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "bevy-inspector-egui",
