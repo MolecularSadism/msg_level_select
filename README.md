@@ -7,9 +7,9 @@ campaign stop connects to at least one stop in the next stage. The crate produce
 ECS entities — nodes, paths, and edges tagged with a traversal FSM — and leaves all rendering to
 the consumer.
 
-| Bevy | msg_level_select |
-|------|-----------------|
-| 0.18 | 0.1             |
+| msg_level_select | Bevy |
+|------------------|------|
+| 0.1, 0.2         | 0.18 |
 
 ## Usage
 
