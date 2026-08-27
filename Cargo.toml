@@ -1,6 +1,6 @@
 [package]
 name = "msg_level_select"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 description = "Procedural FTL-style level map generator with ECS-driven traversal state."
 license = "MIT OR Apache-2.0"
@@ -10,14 +10,20 @@ categories = ["game-engines"]
 readme = "README.md"
 
 [features]
-dev = ["dep:bevy-inspector-egui"]
+dev = ["dep:bevy-inspector-egui", "bevy/bevy_gizmos"]
 # Derive `Serialize`/`Deserialize` on the config types (struct-level
 # `#[serde(default)]` backed by the `Default` impls), so a game can embed
 # `LevelMapConfig` directly in its own config files.
 serde = ["dep:serde"]
 
 [dependencies]
-bevy = "0.18"
+# No default features: this crate is pure ECS/math/reflect data and logic —
+# rendering, UI, audio, asset loading etc. are the consuming game's concern.
+bevy = { version = "0.18", default-features = false, features = [
+    "std",
+    "bevy_log",
+    "bevy_camera",
+] }
 bevy_fsm = "0.5.0"
 voronoice = "0.2"
 rand = "0.10"
