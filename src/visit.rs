@@ -9,7 +9,7 @@
 //! 4. Every outgoing path from the new active node — and that path's edges and waypoint nodes — so
 //!    the reachable corridor lights up as one.
 //!
-//! Promotions go through [`try_promote`], which respects the priority order
+//! Promotions go through `try_promote`, which respects the priority order
 //! `Visited > Active > Available > Inactive`. A `Visited` entity is never
 //! downgraded; the only transition out of `Visited` is back to `Active`
 //! (revisit). This avoids the flicker where a path entity races between
@@ -17,7 +17,7 @@
 //! `Available` writes from clobbering edges that are already `Visited` from a
 //! prior traversal.
 //!
-//! Retraction goes through [`try_retract`], the one downward move: an
+//! Retraction goes through `try_retract`, the one downward move: an
 //! `Available` corridor leaving the previous node falls back to `Inactive`.
 //! `Visited` and `Active` entities are left alone, and anything the new active
 //! node re-lights forward (a shared edge or waypoint) is excluded from

@@ -146,7 +146,7 @@ pub fn generate(cfg: &LevelMapConfig, seed: u64) -> Result<Generated, Generation
 ///
 /// Round 0 re-mixes nothing, so a `requested_seed` that already generated
 /// keeps its exact map. Each later round (up to `rounds`) draws an
-/// independent seed region via [`reseed`] and re-rolls the layout, so a
+/// independent seed region via `reseed` and re-rolls the layout, so a
 /// single unsatisfiable layout can never wedge the caller. If every
 /// honest round is exhausted, a single-site-per-belt linear layout —
 /// trivially satisfiable for any sane bounds — is retried the same way as
