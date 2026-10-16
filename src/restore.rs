@@ -19,7 +19,7 @@
 //! pair with no connecting path (a teleported hop) simply contributes no
 //! corridor.
 //!
-//! Restoration writes through the same [`try_promote`]/[`try_retract`]
+//! Restoration writes through the same `try_promote`/`try_retract`
 //! priority discipline as live traversal rather than replaying
 //! [`VisitLocation`](crate::VisitLocation) hop by hop — the spawn pipeline
 //! has already promoted the entry node to `Active`, so a replayed first hop

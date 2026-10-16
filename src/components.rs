@@ -63,7 +63,7 @@ pub struct MapPath;
 /// geometry is the wall segment itself — the two corner positions where
 /// the two polygons meet — not a line between their sites. Edges that
 /// lie along a chosen [`MapPath`] additionally carry
-/// [`crate::EdgeOfPath`] + [`crate::LocationState`]; "dead" walls have
+/// [`crate::EdgePaths`] + [`crate::LocationState`]; "dead" walls have
 /// neither.
 ///
 /// `from` and `to` are the two cell [`MapNode`] entities the wall

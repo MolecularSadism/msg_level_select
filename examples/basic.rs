@@ -191,11 +191,18 @@ fn side_panel_ui(
         return;
     };
     let ctx = egui_ctx.get_mut();
+    let mut viewport_ui = egui::Ui::new(
+        ctx.clone(),
+        "viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
 
-    egui::SidePanel::left("config_panel")
+    egui::Panel::left("config_panel")
         .resizable(true)
-        .default_width(280.0)
-        .show(ctx, |ui| {
+        .default_size(280.0)
+        .show_inside(&mut viewport_ui, |ui| {
             if ui
                 .add(egui::Button::new("Regenerate Map").min_size(egui::vec2(200.0, 28.0)))
                 .clicked()
@@ -377,7 +384,7 @@ fn click_to_visit(
     }
     // Block clicks landing on the egui panel.
     if let Ok(mut ctx) = egui_ctx_q.single_mut()
-        && ctx.get_mut().wants_pointer_input()
+        && ctx.get_mut().egui_wants_pointer_input()
     {
         return;
     }

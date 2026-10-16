@@ -9,13 +9,14 @@ the consumer.
 
 | msg_level_select | Bevy |
 |------------------|------|
+| 0.4              | 0.19 |
 | 0.1, 0.2, 0.3    | 0.18 |
 
 ## Usage
 
 ```toml
 [dependencies]
-msg_level_select = { git = "https://github.com/MolecularSadism/msg_level_select", tag = "v0.3.0" }
+msg_level_select = { git = "https://github.com/MolecularSadism/msg_level_select", tag = "v0.4.0" }
 ```
 
 ## Quick start
