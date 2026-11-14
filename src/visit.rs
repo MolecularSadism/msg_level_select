@@ -44,7 +44,8 @@ use crate::state::LocationState;
 ///   marked as `Visited`.
 /// - A [`MapPath`]: the player enters the corridor. The path becomes `Visited` and its destination
 ///   becomes `Active`.
-#[derive(Event, Debug, Clone, Copy)]
+#[derive(Event, Reflect, Debug, Clone, Copy)]
+#[reflect(Event)]
 pub struct VisitLocation {
     pub target: Entity,
 }
