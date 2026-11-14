@@ -64,7 +64,8 @@ use crate::visit::{
 /// A `current` key with no matching node on the map discards the whole
 /// restore with a `warn!`; a completed key with no matching node is skipped
 /// with a `warn!` and the rest of the restore proceeds.
-#[derive(Event, Debug, Clone)]
+#[derive(Event, Reflect, Debug, Clone)]
+#[reflect(Event)]
 pub struct RestoreTraversal {
     /// The [`LevelMap`](crate::LevelMap) root whose nodes to restore.
     pub root: Entity,
